@@ -21,7 +21,7 @@ app.use(cors({
   //     : 'app://./' ,// Electron production
 
   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: http://localhost:5173
-  origin: ['https://meetcode-phi.vercel.app', 'app://./'],
+  origin: ['https://meetcode-phi.vercel.app'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true
 }));
@@ -153,8 +153,8 @@ app.post('/', async (req, res) => {
     }, Jwt_Token, { expiresIn: '30hr' });
     res.cookie("token", appToken, {
       httpOnly: true,
-      sameSite: "Lax",
-      secure: false,
+      sameSite: "None",
+      secure: true,
     })
     res.status(200).json({ message: 'Login success', user });
   } catch (error) {
@@ -522,13 +522,22 @@ app.get('/chats/:chatId/messages', authMiddleware, async (req, res) => {
 
 
 const server = createServer(app);
+// const io = new Server(server, {
+//   cors: {
+//     origin: ['http://localhost:5173', 'http://localhost:3000'],
+//     methods: ["GET", "POST"],
+//     credentials: true
+//   }
+// });
+
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    origin: ['https://meetcode-phi.vercel.app'],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
+
 
 
 
