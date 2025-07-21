@@ -21,7 +21,7 @@ app.use(cors({
   //     : 'app://./' ,// Electron production
 
   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: http://localhost:5173
-  origin: ['http://localhost:5173', 'app://./'],
+  origin: ['https://meetcode-phi.vercel.app', 'app://./'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true
 }));
