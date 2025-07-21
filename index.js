@@ -214,7 +214,8 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
     receiver.friendRequestsReceived.includes(senderId) ||
     receiver.friends.includes(senderId)
   ) {
-    return res.redirect('http://localhost:5173/chats');
+    // return res.redirect('http://localhost:5173/chats');
+    return res.redirect('https://meetcode-phi.vercel.app/chats');
   }
 
   // Add friend request
@@ -224,7 +225,8 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
   await receiver.save();
   await sender.save();
 
-  return res.redirect('http://localhost:5173/chats');
+  // return res.redirect('http://localhost:5173/chats');
+  return res.redirect('https://meetcode-phi.vercel.app');
 });
 
 
