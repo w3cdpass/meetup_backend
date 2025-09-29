@@ -41,7 +41,7 @@ app.use(cors({
   //     : 'app://./' ,// Electron production
 
   // curl -i -X OPTIONS http://localhost:3000/ -H "Origin: http://localhost:5173
-  origin: ['http://localhost:5173', 'app://./'],
+  origin: ['https://meetcode-phi.vercel.app'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true
 }));
@@ -234,7 +234,8 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
     receiver.friendRequestsReceived.includes(senderId) ||
     receiver.friends.includes(senderId)
   ) {
-    return res.redirect('http://localhost:5173/chats');
+    // return res.redirect('http://localhost:5173/chats');
+    return res.redirect('https://meetcode-phi.vercel.app/chats');
   }
 
   // Add friend request
@@ -244,7 +245,8 @@ app.get('/frnd-req/:senderId', authMiddleware, async (req, res) => {
   await receiver.save();
   await sender.save();
 
-  return res.redirect('http://localhost:5173/chats');
+  // return res.redirect('http://localhost:5173/chats');
+  return res.redirect('https://meetcode-phi.vercel.app');
 });
 
 
@@ -602,13 +604,22 @@ app.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
 });
 
 const server = createServer(app);
+// const io = new Server(server, {
+//   cors: {
+//     origin: ['http://localhost:5173', 'http://localhost:3000'],
+//     methods: ["GET", "POST"],
+//     credentials: true
+//   }
+// });
+
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    origin: ['https://meetcode-phi.vercel.app'],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
+
 
 
 
