@@ -13,7 +13,27 @@ const jwt = require('jsonwebtoken');
 const { default: mongoose } = require("mongoose");
 const authMiddleware = require("./middlewares/authMiddleware");
 const { Socket } = require("node:dgram");
-
+const fs = require('fs');
+const path = require('path');
+const Trie = require('./trie');
+const { log } = require("node:console");
+const Group = require("./models/Group");
+const trie = new Trie()
+const suggestedWord = path.resolve(__dirname, './suggested.json')
+fs.readFile(suggestedWord, 'utf-8', (err, data) => {
+  if (err) {
+    console.log('Error reading File: ', err);
+    return;
+  }
+  let words;
+  try {
+    words = JSON.parse(data)
+  } catch (error) {
+    console.log('Error parsing JSON', error);
+    return
+  }
+  words.forEach(word => trie.insert(word))
+})
 
 app.use(cors({
   // origin: process.env.NODE_ENV === 'development'
@@ -29,7 +49,7 @@ app.use(cors({
 // JWT_SECRET
 const Jwt_Token = process.env.JWT_SECRET
 // mongoose connection 
-const DB = process.env.MONGO_URI 
+const DB = process.env.MONGO_URI
 // connection to the mongoose
 mongoose.connect(DB, { useNewUrlParser: true, useUnifiedTopology: true }).then(() =>
   console.log('Data base connected'));
@@ -153,8 +173,8 @@ app.post('/', async (req, res) => {
     }, Jwt_Token, { expiresIn: '30hr' });
     res.cookie("token", appToken, {
       httpOnly: true,
-      sameSite: "Lax",
-      secure: false,
+      sameSite: "None",
+      secure: true,
     })
     res.status(200).json({ message: 'Login success', user });
   } catch (error) {
@@ -431,21 +451,20 @@ app.post('/frnd-req/:senderId/decline', authMiddleware, async (req, res) => {
 app.get('/chats', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
+
     const user = await User.findById(userId)
       .populate({
         path: 'friends',
         select: 'name email picture socketId',
         populate: {
           path: 'chats',
-          select: '_id participants lastMessageAt',
-          match: { participants: userId }
+          match: { participants: userId, isGroup: false },
+          select: '_id participants lastMessageAt'
         }
-      })
-      .exec();
+      });
 
-    // Enhance friends data with chat info
     const friendsWithChats = user.friends.map(friend => {
-      const chat = friend.chats?.[0]; // Get the chat between current user and this friend
+      const chat = friend.chats?.[0];
       return {
         ...friend.toObject(),
         chatId: chat?._id,
@@ -453,7 +472,6 @@ app.get('/chats', authMiddleware, async (req, res) => {
       };
     });
 
-    // Sort friends by most recent chat activity
     friendsWithChats.sort((a, b) => {
       const dateA = a.lastMessageAt || new Date(0);
       const dateB = b.lastMessageAt || new Date(0);
@@ -462,10 +480,12 @@ app.get('/chats', authMiddleware, async (req, res) => {
 
     res.json({ friends: friendsWithChats });
   } catch (error) {
-    console.error('Error fetching friends:', error);
-    res.status(500).json({ error: 'Failed to load friends' });
+    console.error('Error fetching chats:', error);
+    res.status(500).json({ error: 'Failed to load chats' });
   }
 });
+
+
 
 // Get or create a chat between current user and another user
 // GET /chat/:chatId/messages
@@ -484,7 +504,8 @@ app.get('/chats', authMiddleware, async (req, res) => {
  *   - 403: If the user is not a participant in the chat.
  *   - 500: On server/database errors, returns an error message.
  *
- * Example success response (200):
+ * Example success resp
+ * onse (200):
  *   {
  *     "messages": { ...chat object with messages and participants... }
  *   }
@@ -520,6 +541,65 @@ app.get('/chats/:chatId/messages', authMiddleware, async (req, res) => {
 });
 
 
+app.get('/groups', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const groups = await Group.find({ participants: userId })
+      .populate("participants", "name email picture")
+      .sort({ lastMessageAt: -1 });
+
+    res.json({ groups });
+  } catch (error) {
+    console.error("Error fetching groups:", error);
+    res.status(500).json({ error: "Failed to load groups" });
+  }
+});
+
+// Create new group
+app.post('/groups', authMiddleware, async (req, res) => {
+  try {
+    const { name, participants } = req.body;
+    const userId = req.user.userId;
+
+    if (!participants.includes(userId)) {
+      participants.push(userId); // make sure creator is in group
+    }
+
+    const group = await Group.create({
+      name,
+      participants
+    });
+
+    res.status(201).json({ message: "Group created", group });
+  } catch (error) {
+    console.error("Error creating group:", error);
+    res.status(500).json({ error: "Failed to create group" });
+  }
+});
+
+// GET /groups/:groupId/messages
+// GET /groups/:groupId/messages
+// GET /groups/:groupId/messages
+app.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.userId;
+
+    const group = await Group.findById(groupId);
+    
+    if (!group || !group.participants.includes(userId)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Return messages sorted by timestamp
+    const messages = group.messages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    res.json({ messages });
+  } catch (error) {
+    console.error('Error fetching group messages:', error);
+    res.status(500).json({ error: 'Failed to fetch group messages' });
+  }
+});
 
 const server = createServer(app);
 const io = new Server(server, {
@@ -624,6 +704,24 @@ io.on('connection', async (ConnectionSocket) => {
       ConnectionSocket.join(roomName);
     });
 
+    ConnectionSocket.on("suggest", (prefix) => {
+      if (!prefix.trim()) {
+        ConnectionSocket.emit("suggestions", []);
+        return
+      }
+      const suggestions = trie.suggest(prefix);
+      ConnectionSocket.emit('suggestions', suggestions)
+    })
+
+    ConnectionSocket.on("react_message", ({ messageId, emoji, userId }) => {
+      // TODO: save to db or in memo store if need
+      ConnectionSocket.broadcast.emit("message_reaction", { messageId, emoji, userId });
+    })
+    // user.chats.forEach(chatId => {
+    //   ConnectionSocket.join(chatId.toString());
+    // });
+
+
 
     /**
      * join_debug event
@@ -642,6 +740,111 @@ io.on('connection', async (ConnectionSocket) => {
       const rooms = [...ConnectionSocket.rooms];
       console.log(`Socket ${ConnectionSocket.id} is in rooms:`, rooms);
     });
+
+    // ConnectionSocket.on("join_group", (chatId) => {
+    //   ConnectionSocket.join(chatId);
+    //   console.log(`User ${ConnectionSocket.id} joined group ${chatId}`);
+    // });
+
+    // // Typing event scoped to group
+    // ConnectionSocket.on("group_typing", ({ chatId, senderId }) => {
+    //   ConnectionSocket.to(chatId).emit("group_typing", { chatId, senderId });
+    // });
+
+
+    // Add these socket event handlers to your existing server code
+
+  // Add these socket event handlers to your existing server code
+
+// Handle joining a group
+ConnectionSocket.on("join_group", (groupId) => {
+  ConnectionSocket.join(groupId);
+  console.log(`User ${ConnectionSocket.id} joined group ${groupId}`);
+});
+
+// Handle group typing
+ConnectionSocket.on("group_typing", ({ chatId, senderId }) => {
+  ConnectionSocket.to(chatId).emit("group_typing", { chatId, senderId });
+});
+
+// Handle group stop typing
+ConnectionSocket.on("group_stop_typing", ({ chatId, senderId }) => {
+  ConnectionSocket.to(chatId).emit("group_stop_typing", { chatId, senderId });
+});
+
+// Handle sending group messages
+ConnectionSocket.on("send_group_message", async (messageData) => {
+  const {chatId, from, text, timestamp, name  } = messageData;
+  // console.log(messageData)
+  // Verify user is a member of the group
+  try {
+  const user = await User.findById(from).select("name");
+    const group = await Group.findById(chatId);
+    
+    if (!group || !group.participants.includes(from)) {
+      return ConnectionSocket.emit('error', { message: "Not a member of this group" });
+    }
+    
+    // Add message to group in database
+    group.messages.push({
+      sender: from,
+      text,
+      timestamp: new Date(timestamp),
+      name: user?.name
+    });
+    
+    group.lastMessageAt = new Date();
+    await group.save();
+    
+    // Broadcast to all group members
+    io.to(chatId).emit("receive_group_message", {
+      ...messageData,
+      _id: Date.now().toString() // Temporary ID for frontend
+    });
+    
+  } catch (error) {
+    console.error("Error sending group message:", error);
+    ConnectionSocket.emit('error', { message: "Failed to send message" });
+  }
+});
+
+// Handle group message reactions
+ConnectionSocket.on("react_group_message", async ({ messageId, emoji, userId }) => {
+  // console.log({ messageId, emoji, userId });
+
+  try {
+    // Find the group that has this messageId in its messages
+    const group = await Group.findOne({ "messages._id": messageId });
+    if (!group) return;
+
+    // Find the message inside the group's messages array
+    const message = group.messages.id(messageId);
+    if (!message) return;
+
+    // Ensure reactions array exists
+    if (!message.reactions) message.reactions = [];
+
+    // Remove existing reaction from this user for the same emoji
+    message.reactions = message.reactions.filter(
+      r => !(r.userId.toString() === userId && r.emoji === emoji)
+    );
+
+    // Add new reaction
+    message.reactions.push({ userId, emoji, timestamp: new Date() });
+
+    await group.save();
+
+    // Broadcast to everyone in that group room
+    io.to(group._id.toString()).emit("group_message_reaction", {
+      messageId,
+      emoji,
+      userId
+    });
+  } catch (error) {
+    console.error("Error reacting to group message:", error);
+  }
+});
+
 
     /**
      * typing event
@@ -747,6 +950,7 @@ io.on('connection', async (ConnectionSocket) => {
       }, 3000); // Save after 3 seconds
     });
 
+
     /**
      * disconnect event
      *
@@ -783,6 +987,6 @@ function createRoomName(userId1, userId2) {
   return [userId1, userId2].sort().join('_');
 }
 
-server.listen(3000, () => {
-  console.log('Server running at http://localhost:3000');
+server.listen(8000, () => {
+  console.log('Server running at http://localhost:8000');
 });

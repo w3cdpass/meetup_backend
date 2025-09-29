@@ -57,6 +57,8 @@ const messageSchema = new Schema({
 const chatSchema = new Schema({
     participants: [{ type: Schema.Types.ObjectId, ref: 'User', required: true }],
     messages: [messageSchema],
+    isGroup: { type: Boolean, default: false },
+    name: {type: String}
 }, { timestamps: true });
 
 const Chat = mongoose.model('Chat', chatSchema,);
